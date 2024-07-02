@@ -1,63 +1,66 @@
-local Debug = false -- Set this to true if you want my debug output.
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local Players = game:GetService("Players")
+local workspace = game:GetService("Workspace")
+local players = game:GetService("Players")
+local runService = game:GetService("RunService")
+local vim = game:GetService("VirtualInputManager")
 
-local Player = Players.LocalPlayer or Players.PlayerAdded:Wait()
-local Remotes = ReplicatedStorage:WaitForChild("Remotes", 9e9) -- A second argument in waitforchild what could it mean?
-local Balls = workspace:WaitForChild("Balls", 9e9)
+local ballFolder = workspace.Balls
+local indicatorPart = Instance.new("Part")
+indicatorPart.Size = Vector3.new(5, 5, 5)
+indicatorPart.Anchored = true
+indicatorPart.CanCollide = false
+indicatorPart.Transparency = 1
+indicatorPart.BrickColor = BrickColor.new("Bright red")
+indicatorPart.Parent = workspace
 
--- Anticheat bypass
-loadstring(game:GetObjects("rbxassetid://15900013841")[1].Source)()
+local lastBallPressed = nil
+local isKeyPressed = false
 
--- Functions
+local function calculatePredictionTime(ball, player)
+    if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+        local rootPart = player.Character.HumanoidRootPart
+        local relativePosition = ball.Position - rootPart.Position
+        local velocity = ball.Velocity + rootPart.Velocity 
+        local a = (ball.Size.magnitude / 2) 
+        local b = relativePosition.magnitude
+        local c = math.sqrt(a * a + b * b)
+        local timeToCollision = (c - a) / velocity.magnitude
+        return timeToCollision
+    end
+    return math.huge
+end
 
-local function print(...) -- Debug print.
-    if Debug then
-        warn(...)
+local function updateIndicatorPosition(ball)
+    indicatorPart.Position = ball.Position
+end
+
+local function checkProximityToPlayer(ball, player)
+    local predictionTime = calculatePredictionTime(ball, player)
+    local realBallAttribute = ball:GetAttribute("realBall")
+    local target = ball:GetAttribute("target")
+    
+    local ballSpeedThreshold = math.max(0.4, 0.6 - ball.Velocity.magnitude * 0.01)
+
+    if predictionTime <= ballSpeedThreshold and realBallAttribute == true and target == player.Name and not isKeyPressed then
+        vim:SendKeyEvent(true, Enum.KeyCode.F, false, nil)
+        wait(0.005)
+        vim:SendKeyEvent(false, Enum.KeyCode.F, false, nil)
+        lastBallPressed = ball
+        isKeyPressed = true
+    elseif lastBallPressed == ball and (predictionTime > ballSpeedThreshold or realBallAttribute ~= true or target ~= player.Name) then
+        isKeyPressed = false
     end
 end
 
-local function VerifyBall(Ball) -- Returns nil if the ball isn't a valid projectile; true if it's the right ball.
-    if typeof(Ball) == "Instance" and Ball:IsA("BasePart") and Ball:IsDescendantOf(Balls) and Ball:GetAttribute("realBall") == true then
-        return true
-    end
-end
-
-local function IsTarget() -- Returns true if we are the current target.
-    return (Player.Character and Player.Character:FindFirstChild("Highlight"))
-end
-
-local function Parry() -- Parries.
-    Remotes:WaitForChild("ParryButtonPress"):Fire()
-end
-
--- The actual code
-
-Balls.ChildAdded:Connect(function(Ball)
-    if not VerifyBall(Ball) then
-        return
-    end
-    
-    print(`Ball Spawned: {Ball}`)
-    
-    local OldPosition = Ball.Position
-    local OldTick = tick()
-    
-    Ball:GetPropertyChangedSignal("Position"):Connect(function()
-        if IsTarget() then -- No need to do the math if we're not being attacked.
-            local Distance = (Ball.Position - workspace.CurrentCamera.Focus.Position).Magnitude
-            local Velocity = (OldPosition - Ball.Position).Magnitude -- Fix for .Velocity not working. Yes I got the lowest possible grade in accuplacer math.
-            
-            print(`Distance: {Distance}\nVelocity: {Velocity}\nTime: {Distance / Velocity}`)
-        
-            if (Distance / Velocity) <= 10 then -- Sorry for the magic number. This just works. No, you don't get a slider for this because it's 2am.
-                Parry()
-            end
+local function checkBallsProximity()
+    local player = players.LocalPlayer
+    if player then
+        for _, ball in pairs(ballFolder:GetChildren()) do
+            checkProximityToPlayer(ball, player)
+            updateIndicatorPosition(ball)
         end
-        
-        if (tick() - OldTick >= 1/60) then -- Don't want it to update too quickly because my velocity implementation is aids. Yes, I tried Ball.Velocity. No, it didn't work.
-            OldTick = tick()
-            OldPosition = Ball.Position
-        end
-    end)
-end)
+    end
+end
+
+runService.Heartbeat:Connect(checkBallsProximity)
+
+print("loadstring(game:HttpGet("https://raw.githubusercontent.com/1f0yt/community/main/AutoBlock"))()")
